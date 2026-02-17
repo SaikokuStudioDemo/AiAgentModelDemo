@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+langgraph
+langchain
+langchain-google-genai
+chromadb
+requests
+python-dotenv
+httpx
+pydantic

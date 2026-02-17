@@ -1,0 +1,23 @@
+# OS
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+.env
+
+# Node
+node_modules/
+npm-debug.log
+dist/
+.next/
+
+# Project Specific
+backend/data/raw/
+backend/chroma_db/
+backend/.env
+test_egov.py
