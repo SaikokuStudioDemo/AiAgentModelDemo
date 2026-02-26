@@ -40,17 +40,34 @@ class VectorStoreService:
         )
 
     def add_documents(self, documents: List[str], metadatas: List[Dict], ids: List[str]):
-        self.collection.add(
-            documents=documents,
-            metadatas=metadatas,
-            ids=ids
-        )
+        batch_size = 5000
+        for i in range(0, len(documents), batch_size):
+            self.collection.add(
+                documents=documents[i:i + batch_size],
+                metadatas=metadatas[i:i + batch_size],
+                ids=ids[i:i + batch_size]
+            )
 
     def query(self, query_text: str, n_results: int = 3):
         return self.collection.query(
             query_texts=[query_text],
             n_results=n_results
         )
+
+    def delete_by_source(self, agent_id: str, source_url: str):
+        # Delete documents matching the specific agent and source url
+        try:
+            self.collection.delete(
+                where={
+                    "$and": [
+                        {"agent_id": agent_id},
+                        {"source": source_url}
+                    ]
+                }
+            )
+            print(f"Deleted vectors for agent {agent_id}, source {source_url}")
+        except Exception as e:
+            print(f"Failed to delete vectors: {e}")
 
 # Global Mock Instance
 vector_store = VectorStoreService()

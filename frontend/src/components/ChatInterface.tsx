@@ -5,9 +5,10 @@ import { chat } from "@/lib/api";
 
 interface ChatInterfaceProps {
     agent: Agent;
+    model: string;
 }
 
-export default function ChatInterface({ agent }: ChatInterfaceProps) {
+export default function ChatInterface({ agent, model }: ChatInterfaceProps) {
     const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [input, setInput] = useState("");
     const [loading, setLoading] = useState(false);
@@ -20,7 +21,13 @@ export default function ChatInterface({ agent }: ChatInterfaceProps) {
 
     useEffect(() => {
         if (scrollRef.current) {
-            scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+            const isUserMessage = messages.length > 0 && messages[messages.length - 1].role === 'user';
+            if (isUserMessage || loading) {
+                // Only auto-scroll to the bottom when the user sends a message, or while loading.
+                // When the AI replies (loading becomes false and an assistant message is added),
+                // we leave the scroll position as is so the user can read from the top down.
+                scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+            }
         }
     }, [messages, loading]);
 
@@ -33,7 +40,11 @@ export default function ChatInterface({ agent }: ChatInterfaceProps) {
         setLoading(true);
 
         try {
-            const res = await chat(agent.id, userMsg.content);
+            const history = messages.map(m => ({
+                role: m.role,
+                content: m.content
+            }));
+            const res = await chat(agent.id, userMsg.content, model, history);
             const aiMsg: ChatMessage = {
                 role: 'assistant',
                 content: res.response,
@@ -48,7 +59,7 @@ export default function ChatInterface({ agent }: ChatInterfaceProps) {
     };
 
     return (
-        <div className="flex flex-col h-[600px] border rounded-xl bg-card overflow-hidden shadow-sm">
+        <div className="flex flex-col h-full border rounded-xl bg-card overflow-hidden shadow-sm">
             <div className="p-4 border-b bg-muted/20 font-medium flex items-center gap-2">
                 <Bot className="w-5 h-5" />
                 Chat with {agent.name}

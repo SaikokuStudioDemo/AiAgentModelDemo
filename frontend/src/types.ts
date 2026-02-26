@@ -1,9 +1,9 @@
-export interface RAMStatus {
-    last_updated: string | null;
-    next_update_scheduled: string | null;
+export interface RAMSource {
+    url: string;
+    title?: string;
     status: string;
+    last_updated: string | null;
     doc_count: number;
-    source_url: string;
 }
 
 export interface Agent {
@@ -11,7 +11,7 @@ export interface Agent {
     name: string;
     type: string;
     description: string;
-    ram_status: RAMStatus;
+    ram_sources: RAMSource[];
 }
 
 export interface ChatMessage {

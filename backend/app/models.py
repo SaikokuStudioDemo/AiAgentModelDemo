@@ -8,23 +8,29 @@ class AgentType(str, Enum):
     LEGAL = "Legal-Agent"
     LABOR = "Labor-Agent"
 
-class RAMStatus(BaseModel):
+class RAMSource(BaseModel):
+    url: str
+    title: Optional[str] = None
+    status: str = "Synced"  # Synced, Updating, Error
     last_updated: Optional[datetime] = None
-    next_update_scheduled: Optional[datetime] = None
-    status: str = "Idle"  # Idle, Updating, Error
     doc_count: int = 0
-    source_url: str
 
 class Agent(BaseModel):
     id: str
     name: str
     type: AgentType
     description: str
-    ram_status: RAMStatus
+    ram_sources: List[RAMSource] = []
     
+class ChatMessageDict(BaseModel):
+    role: str
+    content: str
+
 class ChatRequest(BaseModel):
     message: str
     agent_id: str
+    model: str = "gemini-2.5-flash-lite"
+    history: List[ChatMessageDict] = []
 
 class ChatResponse(BaseModel):
     response: str

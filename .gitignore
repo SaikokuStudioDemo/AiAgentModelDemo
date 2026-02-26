@@ -13,11 +13,14 @@ env/
 # Node
 node_modules/
 npm-debug.log
+*.log
 dist/
 .next/
 
 # Project Specific
 backend/data/raw/
+backend/data/*.db
+!backend/data/seed.sql
 backend/chroma_db/
 backend/.env
 test_egov.py

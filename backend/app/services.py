@@ -1,7 +1,7 @@
 import asyncio
 from datetime import datetime, timedelta
 from typing import List, Dict
-from app.models import Agent, RAMStatus, AgentType
+from app.models import Agent, RAMSource, AgentType
 
 # Mock In-Memory Database
 AGENTS_DB: Dict[str, Agent] = {
@@ -10,30 +10,46 @@ AGENTS_DB: Dict[str, Agent] = {
         name="Tax Agent Alpha",
         type=AgentType.TAX,
         description="Specializes in Japanese Tax Law (Income Tax, Corporate Tax).",
-        ram_status=RAMStatus(
-            last_updated=datetime.now() - timedelta(days=1),
-            next_update_scheduled=datetime.now() + timedelta(hours=12),
-            status="Idle",
-            doc_count=150,
-            source_url="https://laws.e-gov.go.jp/law/340AC0000000033"
-        )
+        ram_sources=[]
     ),
     "labor_01": Agent(
         id="labor_01",
         name="Labor Agent Beta",
         type=AgentType.LABOR,
         description="Expert in Labor Standards Act and workplace regulations.",
-        ram_status=RAMStatus(
-            last_updated=datetime.now() - timedelta(hours=5),
-            next_update_scheduled=datetime.now() + timedelta(days=2),
-            status="Idle",
-            doc_count=85,
-            source_url="https://laws.e-gov.go.jp/law/322AC0000000049"
-        )
+        ram_sources=[]
     )
 }
 
 class AgentService:
+    @staticmethod
+    def load_mappings_from_db():
+        from app.database import SessionLocal
+        from app.models_db import Law, AgentLawMapping
+        
+        db = SessionLocal()
+        try:
+            mappings = db.query(AgentLawMapping).all()
+            for mapping in mappings:
+                agent = AGENTS_DB.get(mapping.agent_id)
+                if agent:
+                    law = db.query(Law).filter(Law.law_id == mapping.law_id).first()
+                    source_url = f"https://laws.e-gov.go.jp/api/1/lawdata/{mapping.law_id}"
+                    
+                    # Prevent duplicates just in case
+                    if not any(s.url == source_url for s in agent.ram_sources):
+                        agent.ram_sources.append(
+                            RAMSource(
+                                url=source_url,
+                                title=law.title if law else None,
+                                status=mapping.status,
+                                last_updated=mapping.last_embedded_at or datetime.now()
+                            )
+                        )
+            print(f"Loaded {len(mappings)} mappings from SQLite into Agent RAM sources.")
+        finally:
+            db.close()
+
     @staticmethod
     def get_all_agents() -> List[Agent]:
         return list(AGENTS_DB.values())
@@ -43,87 +59,105 @@ class AgentService:
         return AGENTS_DB.get(agent_id)
 
     @staticmethod
-    def update_agent_status(agent_id: str, status: str):
+    def create_agent(agent: Agent) -> Agent:
+        if agent.id in AGENTS_DB:
+            raise ValueError(f"Agent with ID {agent.id} already exists.")
+        AGENTS_DB[agent.id] = agent
+        return agent
+
+    @staticmethod
+    def update_source_status(agent_id: str, url: str, status: str, doc_count: int = None, title: str = None):
         if agent_id in AGENTS_DB:
-            AGENTS_DB[agent_id].ram_status.status = status
-            if status == "Updated":
-                AGENTS_DB[agent_id].ram_status.last_updated = datetime.now()
-                AGENTS_DB[agent_id].ram_status.status = "Idle"
+            for source in AGENTS_DB[agent_id].ram_sources:
+                if source.url == url:
+                    source.status = status
+                    if status == "Updated":
+                        source.last_updated = datetime.now()
+                        source.status = "Synced"
+                    if doc_count is not None:
+                        source.doc_count = doc_count
+                    if title is not None:
+                        source.title = title
+                    break
+
+    @staticmethod
+    def delete_source(agent_id: str, url: str) -> bool:
+        if agent_id in AGENTS_DB:
+            original_len = len(AGENTS_DB[agent_id].ram_sources)
+            
+            # Extract law_id from the incoming URL which is likely format:
+            # https://laws.e-gov.go.jp/api/1/lawdata/{law_id} OR https://laws.e-gov.go.jp/law/{law_id}
+            target_law_id = url.split("/")[-1]
+            
+            # Keep sources where the extracted law_id does NOT match the target law_id
+            def extract_id(source_url):
+                return source_url.split("/")[-1]
+                
+            AGENTS_DB[agent_id].ram_sources = [
+                s for s in AGENTS_DB[agent_id].ram_sources 
+                if extract_id(s.url) != target_law_id
+            ]
+            
+            if len(AGENTS_DB[agent_id].ram_sources) < original_len:
+                from app.vector_store import vector_store
+                vector_store.delete_by_source(agent_id, url)
+                return True
+        return False
 
 class EGovService:
     @staticmethod
     async def fetch_law_data(law_id: str):
-        # 1. Fetch from e-Gov API
-        # Note: In real production, use a proper async client like httpx, but requests is fine for this prototype
-        # since we are running in a thread or just assuming low concurrency for now.
-        # However, to be async-friendly in FastAPI, let's wrap it or just use run_in_executor if needed.
-        # For simplicity in this demo (and since we import requests), we'll do a blocking call (not ideal for high load but ok here).
-        import requests
-        import xml.etree.ElementTree as ET
-        import os
-
-        # Strip version suffix if present (e.g. if ID has extra data) - usually ID is fixed length
-        # API URL: https://laws.e-gov.go.jp/api/1/lawdata/{law_id}
-        url = f"https://laws.e-gov.go.jp/api/1/lawdata/{law_id}"
+        from app.database import SessionLocal
+        from app.models_db import Law
         
-        print(f"Fetching Law {law_id} from {url}...")
+        with SessionLocal() as db:
+            law = db.query(Law).filter(Law.law_id == law_id).first()
+            if law and law.full_text:
+                return {
+                    "law_id": law_id,
+                    "content": law.full_text,
+                    "title": law.title
+                }
+        
+        # Fallback to API V1 if not found in DB or missing full_text
+        import httpx
+        import xml.etree.ElementTree as ET
+        
+        url = f"https://laws.e-gov.go.jp/api/1/lawdata/{law_id}"
+        print(f"Fallback fetch Law {law_id} from {url}...")
+        
         try:
-            # Run in thread to not block main loop
-            loop = asyncio.get_event_loop()
-            response = await loop.run_in_executor(None, requests.get, url)
-            response.raise_for_status()
-            
-            # 2. Save Raw XML
-            os.makedirs("data/raw", exist_ok=True)
-            file_path = f"data/raw/{law_id}.xml"
-            with open(file_path, "wb") as f:
-                f.write(response.content)
-            print(f"Saved raw XML to {file_path}")
-
-            # 3. Parse XML
-            root = ET.fromstring(response.content)
-            
-            # Extract Law Title
-            law_title = "Unknown Law"
-            law_num = root.find(".//LawNum")
-            if law_num is not None:
-                law_title = law_num.text
-            
-            # Extract Content (Articles)
-            # We will concat all text for now, but in reality we should chunk by Article
-            full_content = ""
-            articles = root.findall(".//Article")
-            if not articles:
-                 # Fallback if no Article tags (rare for laws, but possible for cabinets orders etc via different tags)
-                 # Just get all text
-                 full_content = "".join(root.itertext())
-            else:
-                content_list = []
-                for article in articles:
-                    title = article.find("ArticleTitle")
-                    title_text = title.text if title is not None else ""
-                    
-                    sentences = []
-                    for sentence in article.findall(".//ParagraphSentence/Sentence"):
-                        if sentence.text:
-                            sentences.append(sentence.text)
-                    
-                    article_text = f"{title_text}\n" + "\n".join(sentences)
-                    content_list.append(article_text)
-                
-                full_content = "\n\n".join(content_list)
-
-            return {
-                "law_id": law_id,
-                "title": law_title,
-                "content": full_content
-            }
-
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                response = await client.get(url)
+                response.raise_for_status()
         except Exception as e:
-            print(f"Error fetching law {law_id}: {e}")
-            # Fallback to mock on error so app doesn't crash
-            return {
-                "law_id": law_id,
-                "title": f"Error loading {law_id}",
-                "content": f"Failed to fetch data: {str(e)}"
-            }
+            print(f"Failed to fetch {law_id}: {e}")
+            raise e
+            
+        try:
+            root = ET.fromstring(response.content)
+            law_full_text = root.find(".//LawFullText")
+            if law_full_text is not None:
+                content = ET.tostring(law_full_text, encoding="unicode")
+            else:
+                content = response.text
+        except Exception:
+            content = response.text
+            
+        with SessionLocal() as db:
+            law = db.query(Law).filter(Law.law_id == law_id).first()
+            if law:
+                law.full_text = content
+                db.commit()
+            else:
+                # If law wasn't found initially, create a new one with full_text
+                new_law = Law(law_id=law_id, title=law_id, full_text=content)
+                db.add(new_law)
+                db.commit()
+                law = new_law # Use the newly created law for title
+                
+        return {
+            "law_id": law_id,
+            "content": content,
+            "title": law.title if law else law_id
+        }
