@@ -5,6 +5,7 @@ import AgentSidebar from "@/components/AgentSidebar";
 import ChatInterface from "@/components/ChatInterface";
 import LawLibrary from "@/components/LawLibrary";
 import KnowledgeBase from "@/components/KnowledgeBase";
+import SyncManager from "@/components/SyncManager";
 import { Agent } from "@/types";
 import { getAgents, createAgent } from "@/lib/api";
 import { MessageSquare, BookOpen } from "lucide-react";
@@ -16,7 +17,7 @@ export default function Dashboard() {
     const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
     const [loading, setLoading] = useState(true);
     const [globalModel, setGlobalModel] = useState("gemini-2.5-flash-lite");
-    const [currentView, setCurrentView] = useState<"workspace" | "library" | "knowledge">("workspace");
+    const [currentView, setCurrentView] = useState<"workspace" | "library" | "knowledge" | "sync">("workspace");
     const [agentTab, setAgentTab] = useState<AgentTab>("chat");
 
     const fetchAgents = async () => {
@@ -90,6 +91,10 @@ export default function Dashboard() {
                 ) : currentView === "knowledge" ? (
                     <div className="flex-1 p-8 overflow-y-auto">
                         <KnowledgeBase />
+                    </div>
+                ) : currentView === "sync" ? (
+                    <div className="flex-1 overflow-y-auto">
+                        <SyncManager />
                     </div>
                 ) : (
                     // Workspace

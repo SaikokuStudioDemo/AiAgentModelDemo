@@ -11,6 +11,7 @@ if "GOOGLE_API_KEY" not in os.environ and os.getenv("GOOGLE_API_KEY"):
 
 from contextlib import asynccontextmanager
 from apscheduler.schedulers.background import BackgroundScheduler
+from app.sync_manager import set_scheduler
 
 from app.api import router as api_router
 from app.library import router as library_router
@@ -40,10 +41,11 @@ def scheduled_nta_sync():
 async def lifespan(app: FastAPI):
     scheduler = BackgroundScheduler()
     # e-Gov sync: every day at 2:00 AM
-    scheduler.add_job(scheduled_job, 'cron', hour=2, minute=0)
+    scheduler.add_job(scheduled_job, 'cron', hour=2, minute=0, id='egov_daily')
     # NTA Tax Answer sync: every Monday at 2:00 AM
-    scheduler.add_job(scheduled_nta_sync, 'cron', day_of_week='mon', hour=2, minute=0)
+    scheduler.add_job(scheduled_nta_sync, 'cron', day_of_week='mon', hour=2, minute=0, id='nta_weekly')
     scheduler.start()
+    set_scheduler(scheduler)
     print("APScheduler started: e-Gov sync @ 2:00 AM daily, NTA sync @ Monday 2:00 AM.")
     
     # Load mapped RAM sources into mock AgentsDB from SQLite

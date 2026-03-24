@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Agent } from "@/types";
-import { Briefcase, Scale, Library, BookOpen, Plus } from "lucide-react";
+import { Briefcase, Scale, Library, BookOpen, RefreshCw, Plus } from "lucide-react";
 import CreateAgentModal from "./CreateAgentModal";
 
 interface AgentSidebarProps {
@@ -9,8 +9,8 @@ interface AgentSidebarProps {
     onSelect: (agent: Agent) => void;
     globalModel: string;
     onModelChange: (model: string) => void;
-    currentView: "workspace" | "library" | "knowledge";
-    onViewChange: (view: "workspace" | "library" | "knowledge") => void;
+    currentView: "workspace" | "library" | "knowledge" | "sync";
+    onViewChange: (view: "workspace" | "library" | "knowledge" | "sync") => void;
     onCreateAgent: (data: { name: string; type: string; description: string }) => Promise<void>;
 }
 
@@ -62,6 +62,16 @@ export default function AgentSidebar({ agents, selectedAgentId, onSelect, global
                 >
                     <BookOpen className="w-4 h-4" />
                     <div className="font-medium">Knowledge Base</div>
+                </button>
+                <button
+                    onClick={() => onViewChange("sync")}
+                    className={`w-full text-left p-3 rounded-lg flex items-center gap-3 transition-colors ${currentView === "sync"
+                        ? "bg-primary text-primary-foreground"
+                        : "hover:bg-muted"
+                        }`}
+                >
+                    <RefreshCw className="w-4 h-4" />
+                    <div className="font-medium">Sync Manager</div>
                 </button>
             </div>
 

@@ -4,6 +4,8 @@ import { useState, useEffect } from 'react';
 import { Agent } from '../types';
 import { RefreshCw, ExternalLink, Search } from 'lucide-react';
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001/api';
+
 interface LawMatrixItem {
     law_id: string;
     law_num: string;
@@ -26,7 +28,7 @@ export default function LawLibrary({ agents }: LawLibraryProps) {
     const fetchLaws = async () => {
         setIsLoading(true);
         try {
-            const res = await fetch('http://localhost:8000/api/library/laws');
+            const res = await fetch(`${API_URL}/library/laws`);
             if (res.ok) {
                 const data = await res.json();
                 setLaws(data);
@@ -39,7 +41,7 @@ export default function LawLibrary({ agents }: LawLibraryProps) {
 
     const fetchSyncStatus = async () => {
         try {
-            const res = await fetch('http://localhost:8000/api/library/sync_status');
+            const res = await fetch(`${API_URL}/library/sync_status`);
             if (res.ok) {
                 const data = await res.json();
                 setSyncState(prev => {
@@ -62,7 +64,7 @@ export default function LawLibrary({ agents }: LawLibraryProps) {
 
     const handleSyncIncremental = async () => {
         try {
-            await fetch('http://localhost:8000/api/library/sync_incremental', { method: 'POST' });
+            await fetch(`${API_URL}/library/sync_incremental`, { method: 'POST' });
             fetchSyncStatus();
         } catch (error) {
             console.error("Failed to start incremental sync", error);
@@ -72,7 +74,7 @@ export default function LawLibrary({ agents }: LawLibraryProps) {
     const handleSyncFull = async () => {
         if (!confirm("Are you sure? This will delete all downloaded full-text data and re-download all existing laws at a slow rate to respect API limits. This process will take hours.")) return;
         try {
-            await fetch('http://localhost:8000/api/library/sync_full', { method: 'POST' });
+            await fetch(`${API_URL}/library/sync_full`, { method: 'POST' });
             fetchSyncStatus();
         } catch (error) {
             console.error("Failed to start full sync", error);
@@ -107,7 +109,7 @@ export default function LawLibrary({ agents }: LawLibraryProps) {
 
         // Send API request
         try {
-            await fetch('http://localhost:8000/api/library/mappings', {
+            await fetch(`${API_URL}/library/mappings`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -261,7 +263,7 @@ export default function LawLibrary({ agents }: LawLibraryProps) {
                                                         施行日: {law.promulgation_date ? law.promulgation_date : 'N/A'}
                                                     </span>
                                                     <a
-                                                        href={`http://localhost:8000/api/laws/${law.law_id}/raw?t=${Date.now()}`}
+                                                        href={`${API_URL}/laws/${law.law_id}/raw?t=${Date.now()}`}
                                                         target="_blank"
                                                         className="text-blue-500 hover:text-blue-600 flex items-center gap-1 font-medium ml-auto"
                                                     >

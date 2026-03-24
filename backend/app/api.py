@@ -602,6 +602,85 @@ def knowledge_nta_view(no: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+### Sync Manager endpoints ###
+
+@router.get("/sync/status")
+def sync_status(db: Session = Depends(get_db)):
+    """全データソースの同期状況・スケジュール情報を返す。"""
+    from app.sync_manager import get_job_next_run, get_scheduler_running
+    from app.nta_scraper import get_status as nta_get_status
+    from app.sync_tasks import SYNC_STATUS
+    from app.models_db import Law
+
+    # 法令の最終更新日
+    latest_law = db.query(Law.last_synced_at).order_by(Law.last_synced_at.desc()).first()
+    law_last_synced = latest_law[0].isoformat() if latest_law and latest_law[0] else None
+    law_count = db.query(Law).count()
+
+    # NTA ステータス
+    nta = nta_get_status()
+    nta_last_updated = nta.get("last_updated_at")
+    nta_last_str = nta_last_updated.isoformat() if nta_last_updated else None
+
+    scheduler_running = get_scheduler_running()
+
+    sources = [
+        {
+            "id": "egov_laws",
+            "name": "法令",
+            "source": "e-Gov（電子政府総合窓口）",
+            "description": "日本の法令全文データベース。e-Gov API から取得・同期。",
+            "record_count": law_count,
+            "last_synced_at": law_last_synced,
+            "next_run_at": get_job_next_run("egov_daily"),
+            "schedule_description": "毎日 2:00 AM",
+            "job_id": "egov_daily",
+            "is_running": SYNC_STATUS.get("is_syncing", False),
+            "run_progress": {
+                "current": SYNC_STATUS.get("current", 0),
+                "total": SYNC_STATUS.get("total", 0),
+                "message": SYNC_STATUS.get("message", ""),
+                "eta_seconds": SYNC_STATUS.get("eta_seconds"),
+            } if SYNC_STATUS.get("is_syncing") else None,
+            "scheduler_active": scheduler_running,
+        },
+        {
+            "id": "nta_taxanswer",
+            "name": "タックスアンサー",
+            "source": "国税庁",
+            "description": "国税庁タックスアンサーのFAQページを収集・ベクトル化。",
+            "record_count": nta.get("count", 0),
+            "last_synced_at": nta_last_str,
+            "next_run_at": get_job_next_run("nta_weekly"),
+            "schedule_description": "毎週月曜 2:00 AM",
+            "job_id": "nta_weekly",
+            "is_running": nta.get("syncing", False),
+            "run_progress": None,
+            "scheduler_active": scheduler_running,
+        },
+    ]
+    return {"sources": sources, "scheduler_active": scheduler_running}
+
+
+@router.post("/sync/trigger/{source_id}")
+async def sync_trigger(source_id: str, background_tasks: BackgroundTasks):
+    """指定ソースの同期を即時実行する。"""
+    if source_id == "egov_laws":
+        from app.sync_tasks import SYNC_STATUS, start_sync_background
+        if SYNC_STATUS.get("is_syncing"):
+            return {"status": "already_running"}
+        background_tasks.add_task(start_sync_background, "incremental")
+        return {"status": "started"}
+    elif source_id == "nta_taxanswer":
+        from app.nta_scraper import run_scrape, _sync_running
+        if _sync_running:
+            return {"status": "already_running"}
+        background_tasks.add_task(run_scrape)
+        return {"status": "started"}
+    else:
+        raise HTTPException(status_code=404, detail=f"Unknown source: {source_id}")
+
+
 ### Chat endpoint ###
 
 @router.post("/chat", response_model=ChatResponse)
