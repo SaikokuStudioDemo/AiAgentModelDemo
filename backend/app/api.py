@@ -662,21 +662,24 @@ def sync_status(db: Session = Depends(get_db)):
     return {"sources": sources, "scheduler_active": scheduler_running}
 
 
+class SyncTriggerRequest(BaseModel):
+    mode: str = "incremental"  # "incremental" | "full"
+
 @router.post("/sync/trigger/{source_id}")
-async def sync_trigger(source_id: str, background_tasks: BackgroundTasks):
-    """指定ソースの同期を即時実行する。"""
+async def sync_trigger(source_id: str, background_tasks: BackgroundTasks, request: SyncTriggerRequest = SyncTriggerRequest()):
+    """指定ソースの同期を即時実行する。mode: incremental（デフォルト）| full"""
     if source_id == "egov_laws":
         from app.sync_tasks import SYNC_STATUS, start_sync_background
         if SYNC_STATUS.get("is_syncing"):
             return {"status": "already_running"}
-        background_tasks.add_task(start_sync_background, "incremental")
-        return {"status": "started"}
+        background_tasks.add_task(start_sync_background, request.mode)
+        return {"status": "started", "mode": request.mode}
     elif source_id == "nta_taxanswer":
         from app.nta_scraper import run_scrape, _sync_running
         if _sync_running:
             return {"status": "already_running"}
         background_tasks.add_task(run_scrape)
-        return {"status": "started"}
+        return {"status": "started", "mode": "incremental"}
     else:
         raise HTTPException(status_code=404, detail=f"Unknown source: {source_id}")
 

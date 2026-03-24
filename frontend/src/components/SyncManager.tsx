@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { RefreshCw, Play, CheckCircle2, Clock, Database, AlertCircle, Calendar } from "lucide-react";
+import { RefreshCw, Play, CheckCircle2, Clock, Database, Download, Calendar } from "lucide-react";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001/api";
 
@@ -62,6 +62,7 @@ export default function SyncManager() {
   const [status, setStatus] = useState<SyncStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [triggering, setTriggering] = useState<Set<string>>(new Set());
+  const [fullSyncConfirm, setFullSyncConfirm] = useState(false);
 
   const fetchStatus = useCallback(async () => {
     try {
@@ -80,17 +81,21 @@ export default function SyncManager() {
     return () => clearInterval(interval);
   }, [fetchStatus]);
 
-  const handleTrigger = async (sourceId: string) => {
-    setTriggering(prev => new Set(prev).add(sourceId));
+  const handleTrigger = async (sourceId: string, mode?: string) => {
+    const key = mode ? `${sourceId}_${mode}` : sourceId;
+    setTriggering(prev => new Set(prev).add(key));
     try {
-      const res = await fetch(`${API_URL}/sync/trigger/${sourceId}`, { method: "POST" });
-      if (res.ok) {
-        setTimeout(fetchStatus, 1000);
-      }
+      const body = mode ? JSON.stringify({ mode }) : undefined;
+      const res = await fetch(`${API_URL}/sync/trigger/${sourceId}`, {
+        method: "POST",
+        headers: body ? { "Content-Type": "application/json" } : undefined,
+        body,
+      });
+      if (res.ok) setTimeout(fetchStatus, 1000);
     } catch (e) {
       console.error(e);
     } finally {
-      setTimeout(() => setTriggering(prev => { const s = new Set(prev); s.delete(sourceId); return s; }), 2000);
+      setTimeout(() => setTriggering(prev => { const s = new Set(prev); s.delete(key); return s; }), 2000);
     }
   };
 
@@ -127,7 +132,13 @@ export default function SyncManager() {
             key={source.id}
             source={source}
             isTriggerring={triggering.has(source.id)}
+            isFullSyncTriggering={triggering.has(`${source.id}_full`)}
+            showFullSync={source.id === "egov_laws"}
+            fullSyncConfirm={fullSyncConfirm && source.id === "egov_laws"}
             onTrigger={() => handleTrigger(source.id)}
+            onFullSyncRequest={() => setFullSyncConfirm(true)}
+            onFullSyncConfirm={() => { setFullSyncConfirm(false); handleTrigger(source.id, "full"); }}
+            onFullSyncCancel={() => setFullSyncConfirm(false)}
           />
         ))}
       </div>
@@ -135,10 +146,16 @@ export default function SyncManager() {
   );
 }
 
-function SourceCard({ source, isTriggerring, onTrigger }: {
+function SourceCard({ source, isTriggerring, isFullSyncTriggering, showFullSync, fullSyncConfirm, onTrigger, onFullSyncRequest, onFullSyncConfirm, onFullSyncCancel }: {
   source: SyncSource;
   isTriggerring: boolean;
+  isFullSyncTriggering: boolean;
+  showFullSync: boolean;
+  fullSyncConfirm: boolean;
   onTrigger: () => void;
+  onFullSyncRequest: () => void;
+  onFullSyncConfirm: () => void;
+  onFullSyncCancel: () => void;
 }) {
   const isRunning = source.is_running;
   const progress = source.run_progress;
@@ -178,16 +195,46 @@ function SourceCard({ source, isTriggerring, onTrigger }: {
               <p className="text-sm text-muted-foreground mt-0.5">{source.description}</p>
             </div>
           </div>
-          <button
-            onClick={onTrigger}
-            disabled={isRunning || isTriggerring}
-            className="flex items-center gap-1.5 text-sm font-medium px-4 py-2 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shrink-0 ml-4"
-          >
-            {isRunning || isTriggerring
-              ? <RefreshCw className="w-4 h-4 animate-spin" />
-              : <Play className="w-4 h-4" />}
-            {isRunning ? "実行中..." : "今すぐ実行"}
-          </button>
+          <div className="flex flex-col gap-2 ml-4 shrink-0">
+            <button
+              onClick={onTrigger}
+              disabled={isRunning || isTriggerring}
+              className="flex items-center gap-1.5 text-sm font-medium px-4 py-2 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {isRunning || isTriggerring
+                ? <RefreshCw className="w-4 h-4 animate-spin" />
+                : <Play className="w-4 h-4" />}
+              {isRunning ? "実行中..." : "今すぐ実行"}
+            </button>
+            {showFullSync && (
+              fullSyncConfirm ? (
+                <div className="flex gap-1.5">
+                  <button
+                    onClick={onFullSyncConfirm}
+                    disabled={isRunning || isFullSyncTriggering}
+                    className="flex-1 text-xs font-medium px-3 py-1.5 rounded-lg bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 transition-colors"
+                  >
+                    実行する
+                  </button>
+                  <button
+                    onClick={onFullSyncCancel}
+                    className="flex-1 text-xs font-medium px-3 py-1.5 rounded-lg border hover:bg-muted transition-colors"
+                  >
+                    キャンセル
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={onFullSyncRequest}
+                  disabled={isRunning}
+                  className="flex items-center gap-1.5 text-xs font-medium px-4 py-1.5 rounded-xl border text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-50 transition-colors"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  Full Text Download
+                </button>
+              )
+            )}
+          </div>
         </div>
 
         {/* Progress detail */}
