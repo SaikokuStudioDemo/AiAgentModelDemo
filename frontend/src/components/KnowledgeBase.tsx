@@ -28,6 +28,8 @@ interface KnowledgeBaseProps {
 }
 
 export default function KnowledgeBase({ agentId, hasNTA = true, compact = false }: KnowledgeBaseProps) {
+  // agentId がない（Management版）は法令タブを非表示
+  const showLaws = !!agentId;
   const [tab, setTab] = useState<Tab>(hasNTA ? "nta" : "laws");
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
@@ -105,10 +107,10 @@ export default function KnowledgeBase({ agentId, hasNTA = true, compact = false 
     }
   }, [debouncedQuery, selectedCategory, page]);
 
-  // 常に両方フェッチ（件数をタブに常時表示するため）
+  // agentId がある場合のみ法令をフェッチ
   useEffect(() => {
-    fetchLaws();
-  }, [fetchLaws]);
+    if (showLaws) fetchLaws();
+  }, [fetchLaws, showLaws]);
 
   useEffect(() => {
     if (hasNTA) fetchNTA();
@@ -134,7 +136,7 @@ export default function KnowledgeBase({ agentId, hasNTA = true, compact = false 
         {!compact && (
           <div className="mb-6">
             <h1 className="text-3xl font-bold tracking-tight text-foreground mb-1">Knowledge Base</h1>
-            <p className="text-muted-foreground">法令・タックスアンサーの一覧・検索・閲覧</p>
+            <p className="text-muted-foreground">タックスアンサーなどのナレッジを一覧・検索・閲覧</p>
           </div>
         )}
 
@@ -143,7 +145,9 @@ export default function KnowledgeBase({ agentId, hasNTA = true, compact = false 
           {hasNTA && (
             <TabButton active={tab === "nta"} onClick={() => setTab("nta")} icon={<BookOpen className="w-4 h-4" />} label="タックスアンサー" count={ntaTotal} />
           )}
-          <TabButton active={tab === "laws"} onClick={() => setTab("laws")} icon={<FileText className="w-4 h-4" />} label="法令" count={lawsTotal} />
+          {showLaws && (
+            <TabButton active={tab === "laws"} onClick={() => setTab("laws")} icon={<FileText className="w-4 h-4" />} label="法令" count={lawsTotal} />
+          )}
         </div>
         {compact && <div className="mb-4" />}
 
