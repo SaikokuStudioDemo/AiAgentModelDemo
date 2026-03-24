@@ -69,11 +69,54 @@ class ChatState(TypedDict):
     context: List[str]
     answer: str
 
+def _fetch_nta_by_no(no: str) -> list[str]:
+    """MongoDBからNo.直接検索する。"""
+    try:
+        from pymongo import MongoClient
+        import os
+        client = MongoClient(os.getenv("MONGODB_URI", "mongodb://localhost:27017"))
+        col = client["saikoku"]["nta_faq"]
+        doc = col.find_one({"no": no}, {"content": 1, "title": 1, "url": 1})
+        if doc:
+            header = f"No.{no} {doc.get('title', '')} ({doc.get('url', '')})"
+            return [header + "\n" + doc.get("content", "")]
+    except Exception as e:
+        print(f"[retrieve] NTA MongoDB direct lookup failed: {e}")
+    return []
+
+
 def retrieve(state: ChatState):
+    import re
     print(f"Retrieving context for {state['question']}")
+    # e-Gov law chunks
     results = vector_store.query(state['question'])
-    # Extract documents from results
     docs = results['documents'][0] if results['documents'] else []
+
+    # NTA FAQ: No.XXXX が質問に含まれる場合はMongoDB直接検索を優先
+    direct_docs = []
+    for match in re.finditer(r'[Nn][Oo][.\s。]?\s*(\d{3,5})', state['question']):
+        no = match.group(1)
+        fetched = _fetch_nta_by_no(no)
+        if fetched:
+            print(f"[retrieve] NTA direct hit: No.{no}")
+            direct_docs.extend(fetched)
+
+    # NTA FAQ vectors (ベクトル検索)
+    try:
+        import chromadb
+        from chromadb.utils import embedding_functions
+        nta_client = chromadb.PersistentClient(path="./chroma_db")
+        ef = embedding_functions.DefaultEmbeddingFunction()
+        nta_col = nta_client.get_or_create_collection(
+            name="nta_faq_vectors", embedding_function=ef
+        )
+        nta_results = nta_col.query(query_texts=[state['question']], n_results=3)
+        nta_docs = nta_results['documents'][0] if nta_results['documents'] else []
+        docs = docs + direct_docs + nta_docs
+    except Exception as e:
+        print(f"[retrieve] NTA FAQ query failed: {e}")
+        docs = docs + direct_docs
+
     return {"context": docs}
 
 async def generate_answer(state: ChatState):

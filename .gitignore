@@ -21,6 +21,8 @@ dist/
 backend/data/raw/
 backend/data/*.db
 !backend/data/seed.sql
+backend/*.db
 backend/chroma_db/
 backend/.env
+frontend/.env.local
 test_egov.py

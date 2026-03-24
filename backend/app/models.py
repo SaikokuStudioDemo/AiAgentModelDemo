@@ -14,6 +14,7 @@ class RAMSource(BaseModel):
     status: str = "Synced"  # Synced, Updating, Error
     last_updated: Optional[datetime] = None
     doc_count: int = 0
+    source_type: str = "e_gov"  # "e_gov" | "nta_faq"
 
 class Agent(BaseModel):
     id: str

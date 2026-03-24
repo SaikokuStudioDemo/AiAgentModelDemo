@@ -8,3 +8,5 @@ requests
 python-dotenv
 httpx
 pydantic
+beautifulsoup4
+pymongo

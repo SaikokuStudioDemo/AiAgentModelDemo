@@ -3,6 +3,13 @@ from datetime import datetime, timedelta
 from typing import List, Dict
 from app.models import Agent, RAMSource, AgentType
 
+_NTA_FAQ_SOURCE = RAMSource(
+    url="https://www.nta.go.jp/taxes/shiraberu/taxanswer/code/index.htm",
+    title="国税庁タックスアンサー（FAQ）",
+    status="Synced",
+    source_type="nta_faq",
+)
+
 # Mock In-Memory Database
 AGENTS_DB: Dict[str, Agent] = {
     "tax_01": Agent(
@@ -10,7 +17,7 @@ AGENTS_DB: Dict[str, Agent] = {
         name="Tax Agent Alpha",
         type=AgentType.TAX,
         description="Specializes in Japanese Tax Law (Income Tax, Corporate Tax).",
-        ram_sources=[]
+        ram_sources=[_NTA_FAQ_SOURCE]
     ),
     "labor_01": Agent(
         id="labor_01",
@@ -36,7 +43,7 @@ class AgentService:
                     law = db.query(Law).filter(Law.law_id == mapping.law_id).first()
                     source_url = f"https://laws.e-gov.go.jp/api/1/lawdata/{mapping.law_id}"
                     
-                    # Prevent duplicates just in case
+                    # Prevent duplicates (including NTA FAQ static source)
                     if not any(s.url == source_url for s in agent.ram_sources):
                         agent.ram_sources.append(
                             RAMSource(

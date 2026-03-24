@@ -1,6 +1,6 @@
-import { Agent, ChatResponse } from "../types";
+import { Agent, ChatResponse, KnowledgeLaw, KnowledgeNTA, KnowledgeListResponse } from "../types";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001/api';
 
 export async function getAgents(): Promise<Agent[]> {
     const res = await fetch(`${API_URL}/agents`);
@@ -47,5 +47,19 @@ export async function chat(agentId: string, message: string, model: string, hist
         body: JSON.stringify({ agent_id: agentId, message, model, history }),
     });
     if (!res.ok) throw new Error('Failed to send message');
+    return res.json();
+}
+
+export async function getKnowledgeLaws(q = "", page = 1, limit = 50, agentId = ""): Promise<KnowledgeListResponse<KnowledgeLaw>> {
+    const params = new URLSearchParams({ q, page: String(page), limit: String(limit), agent_id: agentId });
+    const res = await fetch(`${API_URL}/knowledge/laws?${params}`);
+    if (!res.ok) throw new Error('Failed to fetch laws');
+    return res.json();
+}
+
+export async function getKnowledgeNTA(q = "", category = "", page = 1, limit = 50): Promise<KnowledgeListResponse<KnowledgeNTA>> {
+    const params = new URLSearchParams({ q, category, page: String(page), limit: String(limit) });
+    const res = await fetch(`${API_URL}/knowledge/nta?${params}`);
+    if (!res.ok) throw new Error('Failed to fetch NTA data');
     return res.json();
 }

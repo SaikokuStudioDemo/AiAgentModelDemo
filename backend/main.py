@@ -4,15 +4,19 @@ from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import os
 from dotenv import load_dotenv
-from contextlib import asynccontextmanager
-from apscheduler.schedulers.background import BackgroundScheduler
 
 load_dotenv()
+if "GOOGLE_API_KEY" not in os.environ and os.getenv("GOOGLE_API_KEY"):
+    os.environ["GOOGLE_API_KEY"] = os.getenv("GOOGLE_API_KEY")
+
+from contextlib import asynccontextmanager
+from apscheduler.schedulers.background import BackgroundScheduler
 
 from app.api import router as api_router
 from app.library import router as library_router
 from app.library import process_pending_mappings
 from app.sync_tasks import start_sync_background
+import asyncio as _asyncio
 from app.database import engine, Base
 import app.models_db
 
@@ -25,13 +29,22 @@ def scheduled_job():
     print("Processing pending auto-mappings...")
     process_pending_mappings()
 
+
+def scheduled_nta_sync():
+    print("Running scheduled weekly NTA Tax Answer sync...")
+    from app.nta_scraper import run_scrape
+    _asyncio.run(run_scrape())
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     scheduler = BackgroundScheduler()
-    # Schedule to run every day at 2:00 AM
+    # e-Gov sync: every day at 2:00 AM
     scheduler.add_job(scheduled_job, 'cron', hour=2, minute=0)
+    # NTA Tax Answer sync: every Monday at 2:00 AM
+    scheduler.add_job(scheduled_nta_sync, 'cron', day_of_week='mon', hour=2, minute=0)
     scheduler.start()
-    print("APScheduler started: e-Gov sync scheduled for 2:00 AM daily.")
+    print("APScheduler started: e-Gov sync @ 2:00 AM daily, NTA sync @ Monday 2:00 AM.")
     
     # Load mapped RAM sources into mock AgentsDB from SQLite
     from app.services import AgentService

@@ -1,5 +1,5 @@
 import { Agent, RAMSource } from "@/types";
-import { Database, RefreshCw, CheckCircle, Clock, ExternalLink, Trash2 } from "lucide-react";
+import { Database, RefreshCw, CheckCircle, Clock, ExternalLink, BookOpen } from "lucide-react";
 import { useState } from "react";
 import { triggerUpdate } from "@/lib/api";
 
@@ -44,13 +44,45 @@ export default function RAMInfoPanel({ agent, onUpdateTriggered }: RAMInfoPanelP
             <div className="space-y-4">
                 {agent.ram_sources && agent.ram_sources.length > 0 ? (
                     agent.ram_sources.map((source: RAMSource) => {
+                        const isNtaFaq = source.source_type === "nta_faq";
+
+                        if (isNtaFaq) {
+                            return (
+                                <div key={source.url} className="border rounded-lg p-4 bg-blue-50/50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800">
+                                    <div className="flex justify-between items-start gap-4">
+                                        <div className="flex-1 min-w-0">
+                                            <div className="flex items-center gap-2 mb-2">
+                                                <BookOpen className="w-4 h-4 text-blue-600" />
+                                                <h3 className="font-semibold text-base text-foreground">
+                                                    {source.title}
+                                                </h3>
+                                                <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300">
+                                                    NTA FAQ
+                                                </span>
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <a href={source.url} target="_blank" className="text-sm text-blue-600 hover:underline flex items-center gap-1">
+                                                    <span>国税庁タックスアンサー</span>
+                                                    <ExternalLink className="w-3 h-3" />
+                                                </a>
+                                            </div>
+                                            <div className="flex items-center gap-2 mt-2 text-sm">
+                                                <span className="text-muted-foreground">Status:</span>
+                                                <span className="font-medium text-green-500 flex items-center gap-1">
+                                                    <CheckCircle className="w-3 h-3" /> Synced (自動更新: 毎週月曜 2:00)
+                                                </span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            );
+                        }
+
                         const isUpdating = updatingUrl === source.url || source.status !== "Synced";
                         const statusColor = source.status === "Synced" ? "text-green-500" : "text-amber-500";
-
-                        // Extract actual Law ID from "https://laws.e-gov.go.jp/api/1/lawdata/{law_id}"
                         const urlParts = source.url.split("/");
                         const lawId = urlParts[urlParts.length - 1];
-                        const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
+                        const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001/api";
 
                         return (
                             <div key={source.url} className={`border rounded-lg p-4 bg-muted/10 transition-opacity`}>
@@ -99,7 +131,7 @@ export default function RAMInfoPanel({ agent, onUpdateTriggered }: RAMInfoPanelP
                                                 </span>
                                             </div>
                                         </div>
-                                    </div >
+                                    </div>
 
                                     <div className="flex shrink-0 items-center gap-2">
                                         <button
@@ -111,8 +143,8 @@ export default function RAMInfoPanel({ agent, onUpdateTriggered }: RAMInfoPanelP
                                             {source.status === "Synced" ? "Sync Now" : "Syncing..."}
                                         </button>
                                     </div>
-                                </div >
-                            </div >
+                                </div>
+                            </div>
                         );
                     })
                 ) : (

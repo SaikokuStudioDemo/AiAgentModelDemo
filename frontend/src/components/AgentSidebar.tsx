@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Agent } from "@/types";
-import { Users, Briefcase, Scale, Library, Plus } from "lucide-react";
+import { Briefcase, Scale, Library, BookOpen, Plus } from "lucide-react";
 import CreateAgentModal from "./CreateAgentModal";
 
 interface AgentSidebarProps {
@@ -9,8 +9,8 @@ interface AgentSidebarProps {
     onSelect: (agent: Agent) => void;
     globalModel: string;
     onModelChange: (model: string) => void;
-    currentView: "workspace" | "library";
-    onViewChange: (view: "workspace" | "library") => void;
+    currentView: "workspace" | "library" | "knowledge";
+    onViewChange: (view: "workspace" | "library" | "knowledge") => void;
     onCreateAgent: (data: { name: string; type: string; description: string }) => Promise<void>;
 }
 
@@ -53,6 +53,16 @@ export default function AgentSidebar({ agents, selectedAgentId, onSelect, global
                     <Library className="w-4 h-4" />
                     <div className="font-medium">Law Library (Master)</div>
                 </button>
+                <button
+                    onClick={() => onViewChange("knowledge")}
+                    className={`w-full text-left p-3 rounded-lg flex items-center gap-3 transition-colors ${currentView === "knowledge"
+                        ? "bg-primary text-primary-foreground"
+                        : "hover:bg-muted"
+                        }`}
+                >
+                    <BookOpen className="w-4 h-4" />
+                    <div className="font-medium">Knowledge Base</div>
+                </button>
             </div>
 
             <div className="flex-1 overflow-y-auto space-y-2">
@@ -83,8 +93,8 @@ export default function AgentSidebar({ agents, selectedAgentId, onSelect, global
                                 <div className="font-medium text-sm">{agent.name}</div>
                                 <div className="text-xs opacity-80">{agent.type}</div>
                             </div>
-                            <div className="bg-background/50 text-xs px-2 py-0.5 rounded-full font-mono border border-border/50" title={`${agent.ram_sources?.length || 0} laws assigned`}>
-                                {agent.ram_sources?.length || 0}
+                            <div className="bg-background/50 text-xs px-2 py-0.5 rounded-full font-mono border border-border/50" title={`${agent.ram_sources?.filter(s => s.source_type !== "nta_faq").length || 0} laws assigned`}>
+                                {agent.ram_sources?.filter(s => s.source_type !== "nta_faq").length || 0}
                             </div>
                         </div>
                     </button>
