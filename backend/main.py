@@ -51,7 +51,11 @@ async def lifespan(app: FastAPI):
     # Load mapped RAM sources into mock AgentsDB from SQLite
     from app.services import AgentService
     AgentService.load_mappings_from_db()
-    
+
+    # Create MongoDB indexes for chat_sessions
+    from app.db.mongodb import create_indexes
+    await create_indexes()
+
     yield
     scheduler.shutdown()
 

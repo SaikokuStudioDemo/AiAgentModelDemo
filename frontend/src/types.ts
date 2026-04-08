@@ -15,15 +15,24 @@ export interface Agent {
     ram_sources: RAMSource[];
 }
 
+export interface SourceRef {
+    type: "law" | "nta_faq";
+    id: string;
+    title: string;
+}
+
 export interface ChatMessage {
     role: 'user' | 'assistant';
     content: string;
     source_nodes?: string[];
+    source_refs?: SourceRef[];
 }
 
 export interface ChatResponse {
     response: string;
     source_nodes: string[];
+    session_id?: string;
+    source_refs?: SourceRef[];
 }
 
 export interface KnowledgeLaw {

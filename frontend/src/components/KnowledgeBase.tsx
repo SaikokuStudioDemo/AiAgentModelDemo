@@ -3,7 +3,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { Search, ExternalLink, ChevronLeft, ChevronRight, X, BookOpen, FileText } from "lucide-react";
 import { getKnowledgeLaws, getKnowledgeNTA } from "@/lib/api";
-import { KnowledgeLaw, KnowledgeNTA } from "@/types";
+import { KnowledgeLaw, KnowledgeNTA, SourceRef } from "@/types";
+import TabButton from "@/components/ui/TabButton";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001/api";
 const LIMIT = 50;
@@ -25,9 +26,11 @@ interface KnowledgeBaseProps {
   agentId?: string;       // 指定するとそのエージェントの法令のみ表示
   hasNTA?: boolean;       // タックスアンサータブを表示するか
   compact?: boolean;      // エージェントワークスペース内表示モード
+  pendingRef?: SourceRef | null;
+  onPendingRefHandled?: () => void;
 }
 
-export default function KnowledgeBase({ agentId, hasNTA = true, compact = false }: KnowledgeBaseProps) {
+export default function KnowledgeBase({ agentId, hasNTA = true, compact = false, pendingRef, onPendingRefHandled }: KnowledgeBaseProps) {
   // agentId がない（Management版）は法令タブを非表示
   const showLaws = !!agentId;
   const [tab, setTab] = useState<Tab>(hasNTA ? "nta" : "laws");
@@ -127,6 +130,18 @@ export default function KnowledgeBase({ agentId, hasNTA = true, compact = false 
   const openPanel = (id: string, title: string) => {
     setPanel({ type: "nta", id, title });
   };
+
+  useEffect(() => {
+    if (!pendingRef) return;
+    if (pendingRef.type === "law") {
+      setTab("laws");
+      openOverlay(pendingRef.id, pendingRef.title);
+    } else {
+      setTab("nta");
+      openPanel(pendingRef.id, pendingRef.title);
+    }
+    onPendingRefHandled?.();
+  }, [pendingRef]);
 
   return (
     <div className="relative flex h-full bg-background overflow-hidden" style={{ borderRadius: compact ? undefined : "1.5rem 0 0 1.5rem" }}>
@@ -260,32 +275,6 @@ export default function KnowledgeBase({ agentId, hasNTA = true, compact = false 
   );
 }
 
-function TabButton({ active, onClick, icon, label, count }: {
-  active: boolean;
-  onClick: () => void;
-  icon: React.ReactNode;
-  label: string;
-  count: number;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
-        active
-          ? "border-primary text-primary"
-          : "border-transparent text-muted-foreground hover:text-foreground hover:border-muted-foreground"
-      }`}
-    >
-      {icon}
-      {label}
-      {count > 0 && (
-        <span className={`text-xs px-1.5 py-0.5 rounded-full font-mono ${active ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"}`}>
-          {count.toLocaleString()}
-        </span>
-      )}
-    </button>
-  );
-}
 
 function LawTable({ laws, loading, onOpen }: {
   laws: KnowledgeLaw[];

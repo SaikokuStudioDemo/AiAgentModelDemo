@@ -6,9 +6,12 @@ import ChatInterface from "@/components/ChatInterface";
 import LawLibrary from "@/components/LawLibrary";
 import KnowledgeBase from "@/components/KnowledgeBase";
 import SyncManager from "@/components/SyncManager";
-import { Agent } from "@/types";
+import { Agent, SourceRef } from "@/types";
 import { getAgents, createAgent } from "@/lib/api";
 import { MessageSquare, BookOpen } from "lucide-react";
+import TabButton from "@/components/ui/TabButton";
+
+const DEFAULT_MODEL = process.env.NEXT_PUBLIC_DEFAULT_MODEL ?? "claude-sonnet-4-6";
 
 type AgentTab = "chat" | "knowledge";
 
@@ -16,9 +19,9 @@ export default function Dashboard() {
     const [agents, setAgents] = useState<Agent[]>([]);
     const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
     const [loading, setLoading] = useState(true);
-    const [globalModel, setGlobalModel] = useState("gemini-2.5-flash-lite");
     const [currentView, setCurrentView] = useState<"workspace" | "library" | "knowledge" | "sync">("workspace");
     const [agentTab, setAgentTab] = useState<AgentTab>("chat");
+    const [pendingRef, setPendingRef] = useState<SourceRef | null>(null);
 
     const fetchAgents = async () => {
         try {
@@ -64,7 +67,7 @@ export default function Dashboard() {
     };
 
     if (loading && agents.length === 0) {
-        return <div className="flex h-screen items-center justify-center">Loading SAIKOKU STUDIO...</div>;
+        return <div className="flex h-screen items-center justify-center">Loading AI Agent...</div>;
     }
 
     // エージェントがNTAソースを持つかどうか
@@ -76,8 +79,6 @@ export default function Dashboard() {
                 agents={agents}
                 selectedAgentId={selectedAgent?.id || null}
                 onSelect={handleSelectAgent}
-                globalModel={globalModel}
-                onModelChange={setGlobalModel}
                 currentView={currentView}
                 onViewChange={setCurrentView}
                 onCreateAgent={handleCreateAgent}
@@ -110,13 +111,13 @@ export default function Dashboard() {
                                         </div>
                                     </div>
                                     <div className="flex gap-1 mt-4">
-                                        <AgentTabButton
+                                        <TabButton
                                             active={agentTab === "chat"}
                                             onClick={() => setAgentTab("chat")}
                                             icon={<MessageSquare className="w-4 h-4" />}
                                             label="Chat"
                                         />
-                                        <AgentTabButton
+                                        <TabButton
                                             active={agentTab === "knowledge"}
                                             onClick={() => setAgentTab("knowledge")}
                                             icon={<BookOpen className="w-4 h-4" />}
@@ -129,13 +130,23 @@ export default function Dashboard() {
                                 <div className="flex-1 overflow-hidden">
                                     {agentTab === "chat" ? (
                                         <div className="h-full p-8">
-                                            <ChatInterface agent={selectedAgent} model={globalModel} />
+                                            <ChatInterface
+                                            agent={selectedAgent}
+                                            model={DEFAULT_MODEL}
+                                            userId="dev_user"
+                                            onOpenRef={(ref) => {
+                                                setPendingRef(ref);
+                                                setAgentTab("knowledge");
+                                            }}
+                                        />
                                         </div>
                                     ) : (
                                         <KnowledgeBase
                                             agentId={selectedAgent.id}
                                             hasNTA={agentHasNTA}
                                             compact={true}
+                                            pendingRef={pendingRef}
+                                            onPendingRefHandled={() => setPendingRef(null)}
                                         />
                                     )}
                                 </div>
@@ -152,23 +163,3 @@ export default function Dashboard() {
     );
 }
 
-function AgentTabButton({ active, onClick, icon, label }: {
-    active: boolean;
-    onClick: () => void;
-    icon: React.ReactNode;
-    label: string;
-}) {
-    return (
-        <button
-            onClick={onClick}
-            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
-                active
-                    ? "border-primary text-primary"
-                    : "border-transparent text-muted-foreground hover:text-foreground hover:border-muted-foreground"
-            }`}
-        >
-            {icon}
-            {label}
-        </button>
-    );
-}

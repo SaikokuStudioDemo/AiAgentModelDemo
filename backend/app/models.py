@@ -30,9 +30,12 @@ class ChatMessageDict(BaseModel):
 class ChatRequest(BaseModel):
     message: str
     agent_id: str
-    model: str = "gemini-2.5-flash-lite"
+    model: str = "claude-sonnet-4-6"
     history: List[ChatMessageDict] = []
+    user_id: Optional[str] = None
 
 class ChatResponse(BaseModel):
     response: str
     source_nodes: List[str] = [] # For visualization
+    session_id: Optional[str] = None
+    source_refs: List[dict] = []

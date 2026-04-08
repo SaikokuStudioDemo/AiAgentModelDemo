@@ -4,8 +4,9 @@ from app.services import EGovService, AgentService
 from app.vector_store import vector_store
 import asyncio
 import os
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
+from anthropic import RateLimitError, AuthenticationError, APIError, InternalServerError, APITimeoutError
 
 # --- RAM Update Graph ---
 
@@ -68,6 +69,7 @@ class ChatState(TypedDict):
     history: List[dict]
     context: List[str]
     answer: str
+    source_refs: List[dict]
 
 def _fetch_nta_by_no(no: str) -> list[str]:
     """MongoDBからNo.直接検索する。"""
@@ -113,24 +115,54 @@ def retrieve(state: ChatState):
         nta_results = nta_col.query(query_texts=[state['question']], n_results=3)
         nta_docs = nta_results['documents'][0] if nta_results['documents'] else []
         docs = docs + direct_docs + nta_docs
+
+        # NTA FAQのみ source_refs に含める
+        source_refs = []
+        seen = set()
+        nta_metas = nta_results['metadatas'][0] if nta_results.get('metadatas') else []
+        for meta in nta_metas:
+            no = meta.get('no')
+            if no and no not in seen:
+                seen.add(no)
+                source_refs.append({
+                    "type": "nta_faq",
+                    "id": no,
+                    "title": meta.get('title', f"No.{no}")
+                })
     except Exception as e:
         print(f"[retrieve] NTA FAQ query failed: {e}")
         docs = docs + direct_docs
+        source_refs = []
 
-    return {"context": docs}
+    return {"context": docs, "source_refs": source_refs}
 
 async def generate_answer(state: ChatState):
     context_str = "\n".join(state['context'])
     
-    google_api_key = os.getenv("GOOGLE_API_KEY")
-    if not google_api_key:
-        return {"answer": f"[Mock] Based on {state['agent_id']}'s knowledge:\n{context_str}\n\n(No Google API Key found. Using Mock response.)"}
+    anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
+    if not anthropic_api_key:
+        return {"answer": f"[Mock] Based on {state['agent_id']}'s knowledge:\n{context_str}\n\n(No Anthropic API Key found. Using Mock response.)"}
 
-    model_name = state.get('model', 'gemini-2.5-flash-lite')
-    llm = ChatGoogleGenerativeAI(model=model_name, google_api_key=google_api_key)
+    DEFAULT_MODEL = os.getenv("DEFAULT_AI_MODEL", "claude-sonnet-4-6")
+    model_name = state.get('model') or DEFAULT_MODEL
+    llm = ChatAnthropic(model=model_name, api_key=anthropic_api_key)
     
     messages = [
-        SystemMessage(content=f"You are {state['agent_id']}, a specialized AI agent. Answer based on the following context:\n\n{context_str}")
+        SystemMessage(content=f"""あなたは税務・法令の専門AIアドバイザーです。
+以下の法令Q&AおよびタックスアンサーのFAQを参照して、お客様のご質問にお答えください。
+
+該当する情報が見つからない場合は、「法令Q&AおよびタックスアンサーのFAQには、該当する情報が見つかりませんでした。」と回答してください。
+
+【参照法令の明示ルール】
+回答の末尾に、参照した法令名を必ず以下の形式でリストアップしてください。参照した法令がない場合はこのセクションを省略してください。
+【参照法令】所得税法、法人税法（例）
+
+【相談先の案内ルール】
+- 一般的な相談先として案内する場合は、税理士または公認会計士への相談を推奨してください。
+- 「国税局電話相談センター」は、確定申告・税務調査・申告書の書き方など、税務手続きに直接関わる質問の場合のみ案内してください。それ以外の質問では案内不要です。
+
+【参照情報】
+{context_str}""")
     ]
     
     for msg in state.get('history', []):
@@ -141,8 +173,33 @@ async def generate_answer(state: ChatState):
             
     messages.append(HumanMessage(content=state['question']))
     
-    response = await llm.ainvoke(messages)
-    return {"answer": response.content}
+    try:
+        response = await llm.ainvoke(messages)
+        return {"answer": response.content, "source_refs": state.get("source_refs", [])}
+    except InternalServerError as e:
+        if "overloaded" in str(e).lower():
+            print("[generate_answer] Anthropic overloaded (529)")
+            return {"answer": "現在AIサーバーが混み合っています。少し時間をおいて再度お試しください。", "source_refs": []}
+        print(f"[generate_answer] Anthropic internal server error: {e}")
+        return {"answer": "AIサービスで一時的な問題が発生しています。しばらくお待ちください。", "source_refs": []}
+    except RateLimitError:
+        print("[generate_answer] Anthropic rate limit (429)")
+        return {"answer": "リクエストが集中しています。しばらくお待ちください。", "source_refs": []}
+    except AuthenticationError:
+        print("[generate_answer] Anthropic authentication error (401)")
+        return {"answer": "認証エラーが発生しました。管理者にお問い合わせください。", "source_refs": []}
+    except APITimeoutError:
+        print("[generate_answer] Anthropic API timeout")
+        return {"answer": "応答がタイムアウトしました。再度お試しください。", "source_refs": []}
+    except APIError as e:
+        print(f"[generate_answer] Anthropic API error: {e}")
+        return {"answer": "AIサービスで一時的な問題が発生しています。しばらくお待ちください。", "source_refs": []}
+    except asyncio.TimeoutError:
+        print("[generate_answer] Request timed out")
+        return {"answer": "応答がタイムアウトしました。再度お試しください。", "source_refs": []}
+    except Exception as e:
+        print(f"[generate_answer] Unexpected error: {e}")
+        return {"answer": "申し訳ありません。回答の生成中に予期しないエラーが発生しました。しばらく待ってから再度お試しください。", "source_refs": []}
 
 chat_workflow = StateGraph(ChatState)
 chat_workflow.add_node("retrieve", retrieve)

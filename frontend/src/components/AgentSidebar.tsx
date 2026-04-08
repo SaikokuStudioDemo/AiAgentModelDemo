@@ -7,14 +7,12 @@ interface AgentSidebarProps {
     agents: Agent[];
     selectedAgentId: string | null;
     onSelect: (agent: Agent) => void;
-    globalModel: string;
-    onModelChange: (model: string) => void;
     currentView: "workspace" | "library" | "knowledge" | "sync";
     onViewChange: (view: "workspace" | "library" | "knowledge" | "sync") => void;
     onCreateAgent: (data: { name: string; type: string; description: string }) => Promise<void>;
 }
 
-export default function AgentSidebar({ agents, selectedAgentId, onSelect, globalModel, onModelChange, currentView, onViewChange, onCreateAgent }: AgentSidebarProps) {
+export default function AgentSidebar({ agents, selectedAgentId, onSelect, currentView, onViewChange, onCreateAgent }: AgentSidebarProps) {
     const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
 
     return (
@@ -22,21 +20,6 @@ export default function AgentSidebar({ agents, selectedAgentId, onSelect, global
             <div className="flex items-center gap-3 mb-4">
                 <img src="/logo-saikoku.png" alt="SAIKOKU STUDIO" className="h-10 w-auto object-contain" />
                 <img src="/logo-lab.png" alt="LAB+" className="h-10 w-auto object-contain" />
-            </div>
-
-            <div className="mb-6">
-                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 block">
-                    Global API Model
-                </label>
-                <select
-                    value={globalModel}
-                    onChange={(e) => onModelChange(e.target.value)}
-                    className="w-full text-sm bg-background border rounded-md p-2 focus:outline-none focus:ring-1 focus:ring-primary"
-                >
-                    <option value="gemini-2.5-flash-lite">Gemini Flash Lite</option>
-                    <option value="gemini-2.5-flash">Gemini Flash</option>
-                    <option value="gemini-2.5-pro">Gemini Pro</option>
-                </select>
             </div>
 
             <div className="space-y-2 mb-6 text-sm">

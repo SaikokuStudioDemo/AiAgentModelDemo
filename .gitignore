@@ -25,4 +25,8 @@ backend/*.db
 backend/chroma_db/
 backend/.env
 frontend/.env.local
+frontend/tsconfig.tsbuildinfo
 test_egov.py
+
+# API Keys
+ClaudeAPI.txt

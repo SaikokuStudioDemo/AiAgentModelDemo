@@ -40,11 +40,11 @@ export async function triggerUpdate(id: string, url: string): Promise<{ status: 
 
 
 
-export async function chat(agentId: string, message: string, model: string, history: { role: string, content: string }[] = []): Promise<ChatResponse> {
+export async function chat(agentId: string, message: string, model: string, history: { role: string, content: string }[] = [], userId?: string): Promise<ChatResponse> {
     const res = await fetch(`${API_URL}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ agent_id: agentId, message, model, history }),
+        body: JSON.stringify({ agent_id: agentId, message, model, history, user_id: userId }),
     });
     if (!res.ok) throw new Error('Failed to send message');
     return res.json();

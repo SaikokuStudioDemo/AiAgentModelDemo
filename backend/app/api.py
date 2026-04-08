@@ -1,42 +1,84 @@
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends, Query
-from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
+from pydantic import BaseModel
 from app.database import get_db
-from app.models import Agent, ChatRequest, ChatResponse
+from app.models import Agent, AgentType, ChatRequest, ChatResponse
 from app.services import AgentService
 from app.graph import update_app, chat_app
+from app.nta_scraper import run_scrape, get_status as nta_get_status
+from app.chat_session_service import ChatSessionService
 import asyncio
+import httpx
 import os
 import re
+import threading
+import uuid
 from datetime import datetime, timedelta
 from typing import Optional
 
+# ── 共有HTTPクライアント（コネクションプーリング）────────────────
+_http_client: Optional[httpx.AsyncClient] = None
+
+def get_http_client() -> httpx.AsyncClient:
+    global _http_client
+    if _http_client is None or _http_client.is_closed:
+        _http_client = httpx.AsyncClient(timeout=60.0)
+    return _http_client
+
+
 # ── LawRef キャッシュ ──────────────────────────────────────────
-_law_ref_pattern: Optional[re.Pattern] = None
-_law_ref_map: dict = {}
-_law_ref_built_at: Optional[datetime] = None
 _LAW_REF_TTL = timedelta(hours=1)
 
 
-def _build_law_ref_cache(db: Session):
-    global _law_ref_pattern, _law_ref_map, _law_ref_built_at
-    from app.models_db import Law
-    rows = db.query(Law.law_id, Law.title).all()
-    # 3文字以上のタイトルのみ（短すぎるとノイズになる）
-    filtered = [(law_id, title) for law_id, title in rows if len(title) >= 3]
-    # 長いタイトルを優先マッチさせるため降順ソート
-    filtered.sort(key=lambda x: len(x[1]), reverse=True)
-    _law_ref_map = {title: law_id for law_id, title in filtered}
-    pattern_str = "(" + "|".join(re.escape(t) for t in _law_ref_map) + ")"
-    _law_ref_pattern = re.compile(pattern_str)
-    _law_ref_built_at = datetime.utcnow()
+class LawRefCache:
+    """法令名 → law_id のキャッシュ。スレッドセーフ。"""
+
+    def __init__(self):
+        self._map: dict[str, str] = {}
+        self._pattern: Optional[re.Pattern] = None
+        self._built_at: Optional[datetime] = None
+        self._lock = threading.Lock()
+
+    def get_or_build(self, db: Session) -> dict[str, str]:
+        if self._built_at and (datetime.utcnow() - self._built_at) < _LAW_REF_TTL:
+            return self._map
+        with self._lock:
+            if self._built_at and (datetime.utcnow() - self._built_at) < _LAW_REF_TTL:
+                return self._map
+            self._map, self._pattern = self._build(db)
+            self._built_at = datetime.utcnow()
+            return self._map
+
+    @property
+    def pattern(self) -> Optional[re.Pattern]:
+        return self._pattern
+
+    def invalidate(self):
+        with self._lock:
+            self._map = {}
+            self._pattern = None
+            self._built_at = None
+
+    @staticmethod
+    def _build(db: Session):
+        from app.models_db import Law
+        rows = db.query(Law.law_id, Law.title).all()
+        # 3文字以上のタイトルのみ（短すぎるとノイズになる）
+        filtered = [(law_id, title) for law_id, title in rows if len(title) >= 3]
+        # 長いタイトルを優先マッチさせるため降順ソート
+        filtered.sort(key=lambda x: len(x[1]), reverse=True)
+        law_map = {title: law_id for law_id, title in filtered}
+        pattern_str = "(" + "|".join(re.escape(t) for t in law_map) + ")"
+        pattern = re.compile(pattern_str)
+        return law_map, pattern
+
+
+_law_ref_cache = LawRefCache()
 
 
 def _get_law_ref_cache(db: Session):
-    global _law_ref_built_at
-    if _law_ref_pattern is None or (datetime.utcnow() - _law_ref_built_at) > _LAW_REF_TTL:
-        _build_law_ref_cache(db)
-    return _law_ref_pattern, _law_ref_map
+    law_map = _law_ref_cache.get_or_build(db)
+    return _law_ref_cache.pattern, law_map
 
 
 _ARTICLE_SUFFIX_RE = re.compile(r'(第[〇一二三四五六七八九十百千万]+条)')
@@ -107,10 +149,6 @@ def get_agent(agent_id: str):
         raise HTTPException(status_code=404, detail="Agent not found")
     return agent
 
-from pydantic import BaseModel
-from app.models import AgentType
-import uuid
-
 class CreateAgentRequest(BaseModel):
     name: str
     type: AgentType
@@ -134,8 +172,6 @@ def create_agent(request: CreateAgentRequest):
         return created
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-
-from pydantic import BaseModel
 
 class UpdateRequest(BaseModel):
     url: str
@@ -185,21 +221,20 @@ async def get_law_raw(
 
     # On-the-fly fetch if missing
     if not xml_content:
-        import httpx
         url = f"https://laws.e-gov.go.jp/api/1/lawdata/{law_id}"
         try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                response = await client.get(url)
-                if response.status_code == 200:
-                    import xml.etree.ElementTree as ET
-                    root = ET.fromstring(response.content)
-                    law_full_text = root.find(".//LawFullText")
-                    if law_full_text is not None:
-                        xml_content = ET.tostring(law_full_text, encoding="unicode")
-                        law.full_text = xml_content
-                        db.commit()
-                else:
-                    raise HTTPException(status_code=response.status_code, detail="Failed to fetch from e-Gov")
+            client = get_http_client()
+            response = await client.get(url)
+            if response.status_code == 200:
+                import xml.etree.ElementTree as ET
+                root = ET.fromstring(response.content)
+                law_full_text = root.find(".//LawFullText")
+                if law_full_text is not None:
+                    xml_content = ET.tostring(law_full_text, encoding="unicode")
+                    law.full_text = xml_content
+                    db.commit()
+            else:
+                raise HTTPException(status_code=response.status_code, detail="Failed to fetch from e-Gov")
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to fetch on-the-fly: {e}")
 
@@ -461,13 +496,10 @@ async def get_law_raw(
 
 ### NTA Tax Answer endpoints ###
 
-from app.nta_scraper import run_scrape, get_status as nta_get_status
-
 @router.post("/nta/sync")
 async def nta_sync(background_tasks: BackgroundTasks):
     """国税庁タックスアンサーのスクレイピングをバックグラウンドで実行する。"""
-    from app.nta_scraper import _sync_running
-    if _sync_running:
+    if nta_get_status().get("syncing"):
         return {"status": "already_running"}
     background_tasks.add_task(run_scrape)
     return {"status": "started"}
@@ -675,8 +707,7 @@ async def sync_trigger(source_id: str, background_tasks: BackgroundTasks, reques
         background_tasks.add_task(start_sync_background, request.mode)
         return {"status": "started", "mode": request.mode}
     elif source_id == "nta_taxanswer":
-        from app.nta_scraper import run_scrape, _sync_running
-        if _sync_running:
+        if nta_get_status().get("syncing"):
             return {"status": "already_running"}
         background_tasks.add_task(run_scrape)
         return {"status": "started", "mode": "incremental"}
@@ -687,11 +718,77 @@ async def sync_trigger(source_id: str, background_tasks: BackgroundTasks, reques
 ### Chat endpoint ###
 
 @router.post("/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest):
-    history_dicts = [{"role": h.role, "content": h.content} for h in request.history]
-    inputs = {"question": request.message, "agent_id": request.agent_id, "model": request.model, "history": history_dicts, "context": [], "answer": ""}
+async def chat(request: ChatRequest, db: Session = Depends(get_db)):
+    # user_id の解決
+    dev_mode = os.getenv("DEV_MODE", "false").lower() == "true"
+    user_id = request.user_id
+    if not user_id:
+        if dev_mode:
+            user_id = os.getenv("DEFAULT_USER_ID", "dev_user")
+        else:
+            raise HTTPException(status_code=400, detail="user_id is required")
+
+    # セッション取得または作成
+    session_id = await ChatSessionService.get_or_create_session(user_id, request.agent_id)
+
+    # ユーザーメッセージを保存
+    await ChatSessionService.append_message(session_id, "user", request.message)
+
+    # AIに渡す履歴を取得（直近20件）
+    history = await ChatSessionService.get_recent_messages_for_ai(session_id)
+
+    # graph実行
+    inputs = {
+        "question": request.message,
+        "agent_id": request.agent_id,
+        "model": request.model,
+        "history": history,
+        "context": [],
+        "answer": "",
+        "source_refs": []
+    }
     result = await chat_app.ainvoke(inputs)
+
+    # AIの返答を保存
+    await ChatSessionService.append_message(session_id, "assistant", result["answer"])
+
+    # 回答テキストから法令名を抽出して source_refs を構築
+    law_refs = []
+    nta_refs = result.get("source_refs", [])
+
+    try:
+        _, law_ref_map = _get_law_ref_cache(db)
+        answer_text = result["answer"]
+        seen_law_ids = set()
+
+        for law_title, law_id in law_ref_map.items():
+            if law_title in answer_text and law_id not in seen_law_ids:
+                seen_law_ids.add(law_id)
+                law_refs.append({
+                    "type": "law",
+                    "id": law_id,
+                    "title": law_title
+                })
+    except Exception as e:
+        print(f"[chat] Law ref extraction failed: {e}")
+
+    # NTA FAQのsource_refsと結合
+    source_refs = law_refs + [r for r in nta_refs if r.get("type") == "nta_faq"]
+
     return ChatResponse(
         response=result["answer"],
-        source_nodes=["retrieve", "generate"]
+        source_nodes=["retrieve", "generate"],
+        session_id=session_id,
+        source_refs=source_refs
     )
+
+
+@router.get("/sessions")
+async def get_sessions(user_id: str, agent_id: str):
+    sessions = await ChatSessionService.get_sessions(user_id, agent_id)
+    return {"sessions": sessions}
+
+@router.get("/sessions/{session_id}/messages")
+async def get_session_messages(session_id: str, page: int = 1):
+    messages = await ChatSessionService.get_messages_paginated(session_id, page)
+    return {"messages": messages, "page": page}
